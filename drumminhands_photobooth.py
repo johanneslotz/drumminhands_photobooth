@@ -8,35 +8,36 @@ import time
 import traceback
 from time import sleep
 import RPi.GPIO as GPIO
-import picamera # http://picamera.readthedocs.org/en/release-1.4/install2.html
+#import picamera # http://picamera.readthedocs.org/en/release-1.4/install2.html
 import atexit
 import sys
 import socket
 import pygame
-import pytumblr # https://github.com/tumblr/pytumblr
+import pygame.camera
+#import pytumblr # https://github.com/tumblr/pytumblr
 import config
 from signal import alarm, signal, SIGALRM, SIGKILL
 
 ########################
 ### Variables Config ###
 ########################
-led1_pin = 15 # LED 1
+led1_pin = 12 # LED 1
 led2_pin = 19 # LED 2
 led3_pin = 21 # LED 3
 led4_pin = 23 # LED 4
 button1_pin = 22 # pin for the big red button
-button2_pin = 18 # pin for button to shutdown the pi
+button2_pin = 07 # pin for button to shutdown the pi
 button3_pin = 16 # pin for button to end the program, but not shutdown the pi
 
-post_online = 1 # default 1. Change to 0 if you don't want to upload pics.
-total_pics = 4 # number of pics to be taken
-capture_delay = 2 # delay between pics
-prep_delay = 3 # number of seconds at step 1 as users prep to have photo taken
+post_online = 0 # default 1. Change to 0 if you don't want to upload pics.
+total_pics = 2 # number of pics to be taken
+capture_delay = 0 # delay between pics
+prep_delay = 1 # number of seconds at step 1 as users prep to have photo taken
 gif_delay = 100 # How much time between frames in the animated gif
-restart_delay = 5 # how long to display finished message before beginning a new session
+restart_delay = 2 # how long to display finished message before beginning a new session
 
-monitor_w = 800
-monitor_h = 480
+monitor_w = 1024
+monitor_h = 768
 transform_x = 640 # how wide to scale the jpg when replaying
 transfrom_y = 480 # how high to scale the jpg when replaying
 offset_x = 80 # how far off to left corner to display photos
@@ -48,12 +49,12 @@ test_server = 'www.google.com'
 real_path = os.path.dirname(os.path.realpath(__file__))
 
 # Setup the tumblr OAuth Client
-client = pytumblr.TumblrRestClient(
-    config.consumer_key,
-    config.consumer_secret,
-    config.oath_token,
-    config.oath_secret,
-);
+#client = pytumblr.TumblrRestClient(
+#    config.consumer_key,
+#    config.consumer_secret,
+#    config.oath_token,
+#    config.oath_secret,
+#);
 
 ####################
 ### Other Config ###
@@ -128,10 +129,24 @@ def is_connected():
 
 def init_pygame():
     pygame.init()
+    pygame.camera.init()
     size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
     pygame.display.set_caption('Photo Booth Pics')
     pygame.mouse.set_visible(False) #hide the mouse cursor	
     return pygame.display.set_mode(size, pygame.FULLSCREEN)
+
+def show_camera_until(button):
+    screen = init_pygame()
+    pixel_width = 640
+    pixel_height = 480
+    camera = pygame.camera.Camera("/dev/video0",(pixel_width,pixel_height))
+    camera.start()
+    while GPIO.input(button) == GPIO.HIGH:
+      image = camera.get_image()
+      screen.blit(image,(offset_x,offset_y))
+      pygame.display.flip()
+      sleep(0.01)
+    camera.stop()
 
 def show_image(image_path):
     screen = init_pygame()
@@ -139,6 +154,7 @@ def show_image(image_path):
     img = pygame.transform.scale(img,(transform_x,transfrom_y))
     screen.blit(img,(offset_x,offset_y))
     pygame.display.flip()
+
 
 def display_pics(jpg_group):
     # this section is an unbelievable nasty hack - for some reason Pygame
@@ -174,76 +190,38 @@ def start_photobooth():
 
 	show_image(real_path + "/blank.png")
 	
-	camera = picamera.PiCamera()
-	pixel_width = 500 #use a smaller size to process faster, and tumblr will only take up to 500 pixels wide for animated gifs
-	pixel_height = monitor_h * pixel_width // monitor_w
-	camera.resolution = (pixel_width, pixel_height) 
-	camera.vflip = True
-	camera.hflip = False
-	camera.saturation = -100 # comment out this line if you want color images
-	camera.start_preview()
-	
 	sleep(2) #warm up camera
-
 	################################# Begin Step 2 #################################
 	print "Taking pics" 
 	now = time.strftime("%Y-%m-%d-%H:%M:%S") #get the current date and time for the start of the filename
 	try: #take the photos
-		for i, filename in enumerate(camera.capture_continuous(config.file_path + now + '-' + '{counter:02d}.jpg')):
+		for i in range(1,total_pics+1):
+
+			show_image(real_path + "/taking_picture_%02d.png" % i )
+			filename = config.file_path + now + '-' + "%02d.jpg" % i
 			GPIO.output(led2_pin,True) #turn on the LED
 			print(filename)
+        		os.system("gphoto2 --capture-image-and-download --keep --filename %s" % filename )	
 			sleep(0.25) #pause the LED on for just a bit
 			GPIO.output(led2_pin,False) #turn off the LED
 			sleep(capture_delay) # pause in-between shots
-			if i == total_pics-1:
-				break
 	finally:
-		camera.stop_preview()
-		camera.close()
+		pass
 	########################### Begin Step 3 #################################
-	print "Creating an animated gif" 
-	if post_online:
-		show_image(real_path + "/uploading.png")
-	else:
-		show_image(real_path + "/processing.png")
-
+	print "Showing Images" 
+	
+	for i in range(1,total_pics+1):
+		show_image(config.file_path + now + '-' + "%02d.jpg" % i) 
+		sleep(2)
+	
 	GPIO.output(led3_pin,True) #turn on the LED
-	graphicsmagick = "gm convert -delay " + str(gif_delay) + " " + config.file_path + now + "*.jpg " + config.file_path + now + ".gif" 
-	os.system(graphicsmagick) #make the .gif
-	print "Uploading to tumblr. Please check " + config.tumblr_blog + ".tumblr.com soon."
-
-	if post_online: # turn off posting pics online in the variable declarations at the top of this document
-		connected = is_connected() #check to see if you have an internet connection
-		while connected: 
-			try:
-				file_to_upload = config.file_path + now + ".gif"
-				client.create_photo(config.tumblr_blog, state="published", tags=["drumminhandsPhotoBooth"], data=file_to_upload)
-				break
-			except ValueError:
-				print "Oops. No internect connection. Upload later."
-				try: #make a text file as a note to upload the .gif later
-					file = open(config.file_path + now + "-FILENOTUPLOADED.txt",'w')   # Trying to create a new file or open one
-					file.close()
-				except:
-					print('Something went wrong. Could not write file.')
-					sys.exit(0) # quit Python
-	GPIO.output(led3_pin,False) #turn off the LED
 	
 	########################### Begin Step 4 #################################
-	GPIO.output(led4_pin,True) #turn on the LED
-	try:
-		display_pics(now)
-	except Exception, e:
-		tb = sys.exc_info()[2]
-		traceback.print_exception(e.__class__, e, tb)
 	pygame.quit()
 	print "Done"
 	GPIO.output(led4_pin,False) #turn off the LED
 	
-	if post_online:
-		show_image(real_path + "/finished.png")
-	else:
-		show_image(real_path + "/finished2.png")
+	show_image(real_path + "/finished.png")
 	
 	time.sleep(restart_delay)
 	show_image(real_path + "/intro.png");
@@ -254,6 +232,7 @@ def start_photobooth():
 
 # when a falling edge is detected on button2_pin and button3_pin, regardless of whatever   
 # else is happening in the program, their function will be run   
+#GPIO.add_event_detect(button1_pin, GPIO.FALLING, callback=start_photobooth, bouncetime=300) 
 GPIO.add_event_detect(button2_pin, GPIO.FALLING, callback=shut_it_down, bouncetime=300) 
 
 #choose one of the two following lines to be un-commented
@@ -279,6 +258,7 @@ GPIO.output(led4_pin,False);
 show_image(real_path + "/intro.png");
 
 while True:
-        GPIO.wait_for_edge(button1_pin, GPIO.FALLING)
+        #GPIO.wait_for_edge(button1_pin, GPIO.FALLING)
 	time.sleep(0.2) #debounce
+	show_camera_until(button1_pin)
 	start_photobooth()
