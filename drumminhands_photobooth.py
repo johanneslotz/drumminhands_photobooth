@@ -1,8 +1,11 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 # created by chris@drumminhands.com
 # see instructions at http://www.drumminhands.com/2014/06/15/raspberry-pi-photo-booth/
 
 import os
+import shutil
 import glob
 import time
 import traceback
@@ -38,15 +41,16 @@ restart_delay = 2 # how long to display finished message before beginning a new 
 
 monitor_w = 1024
 monitor_h = 768
-transform_x = 640 # how wide to scale the jpg when replaying
-transfrom_y = 480 # how high to scale the jpg when replaying
-offset_x = 80 # how far off to left corner to display photos
+transform_x = 1024 # how wide to scale the jpg when replaying
+transfrom_y = 768 # how high to scale the jpg when replaying
+offset_x = 0 # how far off to left corner to display photos
 offset_y = 0 # how far off to left corner to display photos
 replay_delay = 1 # how much to wait in-between showing pics on-screen after taking
 replay_cycles = 2 # how many times to show each photo on-screen after taking
 
 test_server = 'www.google.com'
 real_path = os.path.dirname(os.path.realpath(__file__))
+
 
 # Setup the tumblr OAuth Client
 #client = pytumblr.TumblrRestClient(
@@ -67,10 +71,21 @@ GPIO.setup(led4_pin,GPIO.OUT) # LED 4
 GPIO.setup(button1_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 1
 GPIO.setup(button2_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 2
 GPIO.setup(button3_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 3
+
+GPIO.output(led1_pin,True);
+GPIO.output(led2_pin,True);
+GPIO.output(led3_pin,True);
+GPIO.output(led4_pin,True);
+
+time.sleep(0.2)
 GPIO.output(led1_pin,False);
+time.sleep(0.2)
 GPIO.output(led2_pin,False);
+time.sleep(0.2)
 GPIO.output(led3_pin,False);
+time.sleep(0.2)
 GPIO.output(led4_pin,False); #for some reason the pin turns on at the beginning of the program. why?????????????????????????????????
+
 
 #################
 ### Functions ###
@@ -128,31 +143,43 @@ def is_connected():
   return False    
 
 def init_pygame():
+    print "pygame init start"
     pygame.init()
     pygame.camera.init()
     size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
     pygame.display.set_caption('Photo Booth Pics')
     pygame.mouse.set_visible(False) #hide the mouse cursor	
+
+    print "pygame init done"
     return pygame.display.set_mode(size, pygame.FULLSCREEN)
 
 def show_camera_until(button):
-    screen = init_pygame()
-    pixel_width = 640
-    pixel_height = 480
+    global screen
+    font = pygame.font.Font(None, 36)
+    text = font.render(u"Zum Loslegen: Roten Knopf drücken.", True, (128, 128, 128))
+    #screen = init_pygame()
+    pixel_width = 1024
+    pixel_height = 768
     camera = pygame.camera.Camera("/dev/video0",(pixel_width,pixel_height))
     camera.start()
     while GPIO.input(button) == GPIO.HIGH:
       image = camera.get_image()
       screen.blit(image,(offset_x,offset_y))
+      screen.blit(text,(512 - text.get_width() // 2, 384 - text.get_height() // 2))
       pygame.display.flip()
-      sleep(0.01)
+      sleep(0.0001)
     camera.stop()
 
 def show_image(image_path):
-    screen = init_pygame()
-    img=pygame.image.load(image_path) 
+    global screen
+    #screen = init_pygame()
+    print "load"
+    img=pygame.image.load(image_path).convert() 
+    print "scale"
     img = pygame.transform.scale(img,(transform_x,transfrom_y))
+    print "blit"
     screen.blit(img,(offset_x,offset_y))
+    print "flip"
     pygame.display.flip()
 
 
@@ -193,31 +220,35 @@ def start_photobooth():
 	sleep(2) #warm up camera
 	################################# Begin Step 2 #################################
 	print "Taking pics" 
-	now = time.strftime("%Y-%m-%d-%H:%M:%S") #get the current date and time for the start of the filename
+	now = time.strftime("%Y-%m-%d-%H-%M-%S") #get the current date and time for the start of the filename
 	try: #take the photos
-		for i in range(1,total_pics+1):
-
-			show_image(real_path + "/taking_picture_%02d.png" % i )
-			filename = config.file_path + now + '-' + "%02d.jpg" % i
+			show_image(real_path + "/taking_picture_01.png" )
+			tmpfilename = config.tmp_path + now + '-' + "%n.jpg"
+			filename = config.file_path + now + '-' + "%n.jpg"
 			GPIO.output(led2_pin,True) #turn on the LED
-			print(filename)
-        		os.system("gphoto2 --capture-image-and-download --keep --filename %s" % filename )	
+			print("gphoto2 --capture-image-and-download --keep -F 2 --interval 1s --filename %s" % tmpfilename )
+        		os.system("gphoto2 --capture-image-and-download --keep -F 2 --interval 1s --filename %s" % tmpfilename )	
 			sleep(0.25) #pause the LED on for just a bit
 			GPIO.output(led2_pin,False) #turn off the LED
+			print "pausing ..."
 			sleep(capture_delay) # pause in-between shots
+			print "...done2"
 	finally:
 		pass
 	########################### Begin Step 3 #################################
 	print "Showing Images" 
 	
 	for i in range(1,total_pics+1):
-		show_image(config.file_path + now + '-' + "%02d.jpg" % i) 
+		show_image(config.tmp_path + now + '-' + "%d.jpg" % i)
+		print "moving"
+		shutil.move(config.tmp_path + now + '-' + "%d.jpg" % i,config.file_path + now + '-' + "%d.jpg" % i)
+		print "pausing..." 
 		sleep(2)
+		print "...done" 
 	
 	GPIO.output(led3_pin,True) #turn on the LED
 	
 	########################### Begin Step 4 #################################
-	pygame.quit()
 	print "Done"
 	GPIO.output(led4_pin,False) #turn off the LED
 	
@@ -242,19 +273,21 @@ GPIO.add_event_detect(button3_pin, GPIO.FALLING, callback=exit_photobooth, bounc
 # delete files in folder on startup
 files = glob.glob(config.file_path + '*')
 for f in files:
-    os.remove(f)
+   print f 
+   #os.remove(f)
 
 print "Photo booth app running..." 
 GPIO.output(led1_pin,True); #light up the lights to show the app is running
 GPIO.output(led2_pin,True);
 GPIO.output(led3_pin,True);
 GPIO.output(led4_pin,True);
-time.sleep(3)
+time.sleep(0.5)
 GPIO.output(led1_pin,False); #turn off the lights
 GPIO.output(led2_pin,False);
 GPIO.output(led3_pin,False);
 GPIO.output(led4_pin,False);
 
+screen = init_pygame()
 show_image(real_path + "/intro.png");
 
 while True:

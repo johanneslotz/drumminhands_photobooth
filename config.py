@@ -5,4 +5,5 @@ consumer_secret='CONSUMER_SECRET' #replace with your secret code
 oath_token='OATH_TOKEN' #replace with you oath token
 oath_secret='OATH_SECRET' #replace with your oath secret code
 tumblr_blog = 'TUMBLR_BLOG' # replace with your tumblr account name without .tumblr.com
-file_path = '/home/pi/photobooth/pics/' # path to save images
+file_path = '/mnt/sda1/imgs/' # path to save images
+tmp_path = '/dev/shm/' # path to save images
